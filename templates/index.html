@@ -368,6 +368,37 @@ input[type=file] { display: none; }
 }
 .dl-row.show { display: flex; }
 
+.nf-row {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px;
+}
+.nf-btn {
+  width: 26px; height: 26px;
+  background: var(--border2); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
+  font-size: 1rem; font-weight: 700; line-height: 1;
+  cursor: pointer; transition: background .15s;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.nf-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
+.nf-input {
+  width: 50px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono); font-size: .82rem;
+  padding: 5px 0; text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.nf-input::-webkit-outer-spin-button,
+.nf-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.nf-input:focus { border-color: var(--accent); }
+.nf-hint {
+  font-family: var(--mono); font-size: .6rem;
+  color: var(--purple); line-height: 1.3;
+}
 .rename-input {
   background: var(--card);
   border: 1px solid var(--border2);
@@ -579,10 +610,10 @@ input[type=file] { display: none; }
         <div>
           <div class="section-label">GF180MCU Design Rules</div>
           <div class="rules-grid">
+
+            <!-- NMOS -->
             <div class="device-card nmos">
-              <div class="device-label">
-                <span class="tag"></span>NMOS — nfet_03v3
-              </div>
+              <div class="device-label"><span class="tag"></span>NMOS — nfet_03v3</div>
               <div class="field-row">
                 <div class="field">
                   <label>Min L</label>
@@ -591,18 +622,26 @@ input[type=file] { display: none; }
                   </div>
                 </div>
                 <div class="field">
-                  <label>Min W</label>
+                  <label>Min W/finger</label>
                   <div class="input-wrap">
-                    <input type="number" id="nmos_Wmin" value="0.44" step="0.01" min="0.01">
+                    <input type="number" id="nmos_Wmin" value="0.44" step="0.01" min="0.01" oninput="updateHint('nmos')">
                   </div>
+                </div>
+              </div>
+              <div class="field" style="margin-top:10px">
+                <label>Fingers (nf)</label>
+                <div class="nf-row">
+                  <button class="nf-btn" onclick="changeNf('nmos',-1)">−</button>
+                  <input class="nf-input" type="number" id="nmos_nf" value="1" min="1" max="64" step="1" oninput="updateHint('nmos')">
+                  <button class="nf-btn" onclick="changeNf('nmos',1)">+</button>
+                  <span class="nf-hint" id="nmos_hint"></span>
                 </div>
               </div>
             </div>
 
+            <!-- PMOS -->
             <div class="device-card pmos">
-              <div class="device-label">
-                <span class="tag"></span>PMOS — pfet_03v3
-              </div>
+              <div class="device-label"><span class="tag"></span>PMOS — pfet_03v3</div>
               <div class="field-row">
                 <div class="field">
                   <label>Min L</label>
@@ -611,13 +650,23 @@ input[type=file] { display: none; }
                   </div>
                 </div>
                 <div class="field">
-                  <label>Min W</label>
+                  <label>Min W/finger</label>
                   <div class="input-wrap">
-                    <input type="number" id="pmos_Wmin" value="0.44" step="0.01" min="0.01">
+                    <input type="number" id="pmos_Wmin" value="0.44" step="0.01" min="0.01" oninput="updateHint('pmos')">
                   </div>
                 </div>
               </div>
+              <div class="field" style="margin-top:10px">
+                <label>Fingers (nf)</label>
+                <div class="nf-row">
+                  <button class="nf-btn" onclick="changeNf('pmos',-1)">−</button>
+                  <input class="nf-input" type="number" id="pmos_nf" value="1" min="1" max="64" step="1" oninput="updateHint('pmos')">
+                  <button class="nf-btn" onclick="changeNf('pmos',1)">+</button>
+                  <span class="nf-hint" id="pmos_hint"></span>
+                </div>
+              </div>
             </div>
+
           </div>
         </div>
 
@@ -784,6 +833,8 @@ async function doConvert() {
   fd.append('nmos_Wmin', document.getElementById('nmos_Wmin').value);
   fd.append('pmos_Lmin', document.getElementById('pmos_Lmin').value);
   fd.append('pmos_Wmin', document.getElementById('pmos_Wmin').value);
+  fd.append('nmos_nf',   document.getElementById('nmos_nf').value);
+  fd.append('pmos_nf',   document.getElementById('pmos_nf').value);
 
   try {
     const res  = await fetch('/convert', { method: 'POST', body: fd });
@@ -923,6 +974,24 @@ document.getElementById('dlBtn').addEventListener('click', () => {
   });
   a.click(); URL.revokeObjectURL(a.href);
 });
+
+// ── Finger helpers ────────────────────────────────────────────────
+function changeNf(type, delta) {
+  const el = document.getElementById(type + '_nf');
+  el.value = Math.max(1, Math.min(64, (parseInt(el.value) || 1) + delta));
+  updateHint(type);
+}
+
+function updateHint(type) {
+  const nf   = parseInt(document.getElementById(type + '_nf').value) || 1;
+  const wmin = parseFloat(document.getElementById(type + '_Wmin').value) || 0.44;
+  const hint = document.getElementById(type + '_hint');
+  if (nf > 1) {
+    hint.textContent = `${nf}f × ${wmin}µm = ${(nf * wmin).toFixed(3)}µm total`;
+  } else {
+    hint.textContent = '';
+  }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 function esc(s) {

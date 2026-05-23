@@ -365,6 +365,24 @@ input[type=file] { display: none; }
 .btn-dl.show { display: flex; }
 .btn-dl:hover { background: rgba(34,197,94,.18); transform: translateY(-1px); }
 
+.dl-row {
+  display: none; align-items: center; gap: 8px;
+}
+.dl-row.show { display: flex; }
+
+.rename-input {
+  background: var(--card);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono); font-size: .72rem;
+  padding: 5px 10px;
+  width: 220px;
+  outline: none;
+  transition: border-color .15s;
+}
+.rename-input:focus { border-color: var(--accent); }
+
 /* ── Tab panels ──────────────────────────────────────────────────── */
 .tab-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .tab-panel   { display: none; flex: 1; overflow: hidden; flex-direction: column; }
@@ -637,7 +655,10 @@ input[type=file] { display: none; }
         <div class="toolbar-tab active" id="tab-log-btn"     onclick="switchTab('log')">Change Log</div>
         <div class="toolbar-tab"        id="tab-summary-btn" onclick="switchTab('summary')">Device Summary</div>
         <div class="toolbar-spacer"></div>
-        <button class="btn-dl" id="dlBtn">⬇ Download <span id="dlName"></span></button>
+        <div class="dl-row" id="dlRow">
+          <input class="rename-input" id="renameInput" type="text" spellcheck="false" placeholder="filename.sch">
+          <button class="btn-dl" id="dlBtn">⬇ Download</button>
+        </div>
       </div>
 
       <!-- Stats -->
@@ -798,9 +819,9 @@ function applyResults(data) {
   s.scaled > 0 ? wb.classList.add('show') : wb.classList.remove('show');
 
   // Download
-  const dl = document.getElementById('dlBtn');
+  const dl = document.getElementById('dlRow');
   dl.classList.add('show');
-  document.getElementById('dlName').textContent = outputFilename;
+  document.getElementById('renameInput').value = outputFilename;
 
   // Render log
   renderLog(data.changes);
@@ -893,9 +914,11 @@ function switchTab(name) {
 // ── Download ───────────────────────────────────────────────────────
 document.getElementById('dlBtn').addEventListener('click', () => {
   if (!convertedText) return;
+  const name = document.getElementById('renameInput').value.trim() || outputFilename;
+  const finalName = name.endsWith('.sch') ? name : name + '.sch';
   const a = Object.assign(document.createElement('a'), {
     href: URL.createObjectURL(new Blob([convertedText], {type: 'text/plain'})),
-    download: outputFilename
+    download: finalName
   });
   a.click(); URL.revokeObjectURL(a.href);
 });

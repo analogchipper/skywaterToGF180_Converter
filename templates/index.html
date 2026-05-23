@@ -847,7 +847,10 @@ function renderLog(changes) {
       ? '<span class="badge badge-scaled">Scaled</span>'
       : (!isInfo ? '<span class="badge badge-ok">OK</span>' : '');
 
-    const ratio  = c.ratio ? `<span class="col-ratio">${c.ratio}</span>` : '—';
+    const ratioTip = c.nf > 1
+          ? `${c.ratio} · ${c.nf}f @ ${c.finger_w}µm/f`
+          : (c.ratio || null);
+        const ratio = ratioTip ? `<span class="col-ratio">${esc(ratioTip)}</span>` : '—';
     const color  = TYPE_COLORS[c.type] || '#94a3b8';
 
     const tr = document.createElement('tr');

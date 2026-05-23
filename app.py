@@ -101,7 +101,17 @@ def snap_to_grid(val_um, grid_um=0.005):
 
 W_GRID_UM = 0.005  # 5nm grid
 
-def scale_maintaining_ratio(w_raw, l_raw, min_w, min_l):
+def scale_maintaining_ratio(w_raw, l_raw, min_w, min_l, nf=1):
+    """
+    w_raw, l_raw : Sky130 nm values (plain integer strings)
+    min_w, min_l : GF180 minimums in µm
+    nf           : desired number of fingers (default 1 = no change)
+
+    W in xschem = total width. With nf fingers, each finger = W/nf.
+    Each finger must be >= min_w and on the 5nm grid.
+    Total W is then snapped finger_w * nf.
+    L is scaled to preserve the original W/L ratio of the whole device.
+    """
     w_clean = w_raw.rstrip('uU')
     l_clean = l_raw.rstrip('uU')
     try:
@@ -110,19 +120,25 @@ def scale_maintaining_ratio(w_raw, l_raw, min_w, min_l):
     except ValueError:
         return w_raw, l_raw, False, "expr", None, None
 
-    ratio = w_orig / l_orig
+    ratio = w_orig / l_orig          # original W/L (total W / L)
 
-    # 1. Scale to meet minimums (ratio preserved)
-    l_new = max(l_orig, min_l, min_w / ratio)
-    w_new = l_new * ratio
+    # Per-finger minimum width
+    finger_min = min_w               # each finger >= min_w
 
-    # 2. Snap W UP to nearest 5nm grid boundary
-    w_snapped = snap_to_grid(w_new, W_GRID_UM)
+    # Scale: each finger must be >= finger_min, and total W >= nf*finger_min
+    # Start from the ratio-preserving L, then compute per-finger W
+    l_new = max(l_orig, min_l, (nf * finger_min) / ratio)
+    w_total_new = l_new * ratio      # total W preserving ratio
+    finger_w = w_total_new / nf      # per-finger width
 
-    # 3. If W was snapped up, recompute L to preserve ratio, then snap L too
-    if w_snapped > w_new + 1e-9:
-        l_new = w_snapped / ratio
-    l_snapped = snap_to_grid(l_new, W_GRID_UM)
+    # Snap each finger UP to 5nm grid
+    finger_w_snapped = snap_to_grid(max(finger_w, finger_min), W_GRID_UM)
+
+    # Recompute total W and L from snapped finger
+    w_snapped = finger_w_snapped * nf
+    # Recompute L to keep ratio exact
+    l_from_ratio = w_snapped / ratio
+    l_snapped = snap_to_grid(max(l_from_ratio, min_l), W_GRID_UM)
 
     scaled = (l_snapped - l_orig > 1e-6) or (w_snapped - w_orig > 1e-6)
 
@@ -183,21 +199,34 @@ def convert_component(comp, rules):
             changes.append({'device': dev, 'type': 'model', 'scaled': False,
                             'from': sky_m, 'to': gf_m})
 
-    # 3. W/L ratio-preserving scale
+    # 3. W/L ratio-preserving scale + finger update
     Lmin = rules["pmos_Lmin"] if is_pmos else rules["nmos_Lmin"]
     Wmin = rules["pmos_Wmin"] if is_pmos else rules["nmos_Wmin"]
+    nf   = rules.get("nmos_nf" if not is_pmos else "pmos_nf", 1)
     w_raw, l_raw = get_param(props, "W"), get_param(props, "L")
 
     if w_raw and l_raw:
         w_new, l_new, scaled, ratio, w_orig, l_orig = scale_maintaining_ratio(
-            w_raw, l_raw, Wmin, Lmin)
+            w_raw, l_raw, Wmin, Lmin, nf=nf)
         props = set_param(props, "W", w_new)
         props = set_param(props, "L", l_new)
+
+        # Update nf in props if user requested fingers > 1
+        if nf > 1:
+            old_nf = get_param(props, "nf")
+            if old_nf is not None:
+                props = set_param(props, "nf", str(nf))
+
+        finger_w = float(w_new.rstrip('u')) / nf
+        finger_w_s = f"{finger_w:.4f}".rstrip('0').rstrip('.')
+
         changes.append({
             'device': dev, 'type': 'W/L', 'scaled': scaled,
             'from': f"W={w_orig}µm L={l_orig}µm" if w_orig else f"W={w_raw} L={l_raw}",
             'to':   f"W={w_new} L={l_new}",
             'ratio': ratio,
+            'nf': nf,
+            'finger_w': finger_w_s,
         })
 
     # 4. mult → m
@@ -261,7 +290,11 @@ def convert():
             'nmos_Wmin': float(request.form.get('nmos_Wmin', 0.44)),
             'pmos_Lmin': float(request.form.get('pmos_Lmin', 0.28)),
             'pmos_Wmin': float(request.form.get('pmos_Wmin', 0.44)),
+            'nmos_nf':   int(request.form.get('nmos_nf', 1)),
+            'pmos_nf':   int(request.form.get('pmos_nf', 1)),
         }
+        if rules['nmos_nf'] < 1: rules['nmos_nf'] = 1
+        if rules['pmos_nf'] < 1: rules['pmos_nf'] = 1
     except ValueError:
         return jsonify({'error': 'Invalid dimension value'}), 400
 

@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sky130 → GF180MCU Converter</title>
+<style>
+/* ── Reset & Variables ───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0c0f1a;
+  --panel:     #111827;
+  --card:      #151e30;
+  --border:    #1f2d45;
+  --border2:   #263548;
+  --accent:    #00c8f0;
+  --accent-d:  #0099bb;
+  --purple:    #8b5cf6;
+  --green:     #22c55e;
+  --orange:    #f59e0b;
+  --red:       #ef4444;
+  --blue:      #3b82f6;
+  --pink:      #ec4899;
+  --text:      #e2e8f0;
+  --sub:       #94a3b8;
+  --muted:     #475569;
+  --mono:      'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --sans:      'Inter', 'Segoe UI', system-ui, sans-serif;
+  --radius:    12px;
+  --radius-sm: 8px;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Background grid ─────────────────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    linear-gradient(rgba(0,200,240,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,200,240,.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Titlebar (fake OS window) ───────────────────────────────────── */
+.titlebar {
+  position: relative; z-index: 10;
+  height: 40px;
+  background: #0a0d16;
+  border-bottom: 1px solid #141c2e;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.tb-dots { display: flex; gap: 6px; }
+.tb-dot  {
+  width: 12px; height: 12px; border-radius: 50%;
+  transition: filter .15s;
+}
+.tb-dot:hover { filter: brightness(1.3); }
+.tb-dot.close  { background: #ff5f56; }
+.tb-dot.min    { background: #ffbd2e; }
+.tb-dot.max    { background: #27c93f; }
+
+.tb-title {
+  flex: 1; text-align: center;
+  font-size: .72rem; color: var(--muted);
+  font-family: var(--mono); letter-spacing: .06em;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+.layout {
+  display: flex; flex: 1;
+  position: relative; z-index: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 52px;
+  background: #0a0d16;
+  border-right: 1px solid #141c2e;
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sb-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; cursor: default;
+  color: var(--muted);
+  transition: all .15s;
+}
+.sb-icon.active {
+  background: rgba(0,200,240,.12);
+  color: var(--accent);
+}
+.sb-icon:hover { color: var(--text); }
+
+/* ── Main content ────────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+}
+
+/* ── Left pane ───────────────────────────────────────────────────── */
+.left-pane {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+.pane-header {
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+
+.pane-title {
+  font-size: .72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em;
+  color: var(--sub);
+  font-family: var(--mono);
+}
+
+.pane-body {
+  flex: 1; overflow-y: auto; padding: 20px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.pane-body::-webkit-scrollbar { width: 4px; }
+.pane-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ── Sections ────────────────────────────────────────────────────── */
+.section-label {
+  font-size: .65rem; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: .1em;
+  color: var(--muted); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-label::after {
+  content: ''; flex: 1; height: 1px;
+  background: var(--border);
+}
+
+/* ── Drop zone ───────────────────────────────────────────────────── */
+.drop-zone {
+  border: 1.5px dashed var(--border2);
+  border-radius: var(--radius);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  background: rgba(0,200,240,.02);
+  position: relative;
+}
+.drop-zone:hover, .drop-zone.over {
+  border-color: var(--accent);
+  background: rgba(0,200,240,.06);
+}
+.drop-zone.ready {
+  border-color: var(--green);
+  background: rgba(34,197,94,.04);
+}
+.drop-icon { font-size: 2rem; opacity: .5; margin-bottom: 8px; }
+.drop-zone h3 { font-size: .9rem; font-weight: 600; margin-bottom: 4px; }
+.drop-zone p  { font-size: .75rem; color: var(--muted); font-family: var(--mono); }
+
+input[type=file] { display: none; }
+
+/* ── File chip ───────────────────────────────────────────────────── */
+.file-chip {
+  display: none; align-items: center; gap: 10px;
+  background: rgba(34,197,94,.08);
+  border: 1px solid rgba(34,197,94,.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-family: var(--mono); font-size: .78rem;
+}
+.file-chip.show { display: flex; }
+.chip-icon { font-size: 1.1rem; }
+.chip-name { color: var(--green); flex: 1; font-weight: 500;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip-size { color: var(--muted); font-size: .68rem; flex-shrink: 0; }
+
+/* ── Rules ───────────────────────────────────────────────────────── */
+.rules-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+
+.device-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  transition: border-color .2s;
+}
+.device-card:focus-within { border-color: var(--border2); }
+
+.device-label {
+  font-family: var(--mono); font-size: .65rem;
+  text-transform: uppercase; letter-spacing: .08em;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.tag {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.nmos .tag { background: var(--blue); }
+.pmos .tag { background: var(--pink); }
+
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label {
+  font-family: var(--mono); font-size: .6rem;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+}
+
+.input-wrap { position: relative; }
+.input-wrap input {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--mono); font-size: .82rem;
+  padding: 7px 30px 7px 10px;
+  outline: none;
+  transition: border-color .15s;
+  -moz-appearance: textfield;
+}
+.input-wrap input::-webkit-outer-spin-button,
+.input-wrap input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.input-wrap input:focus { border-color: var(--accent); }
+.input-wrap::after {
+  content: 'µm';
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--mono); font-size: .6rem;
+  color: var(--muted); pointer-events: none;
+}
+
+/* ── PDK legend ──────────────────────────────────────────────────── */
+.pdk-legend {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: .7rem;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.pdk-legend strong { color: var(--text); }
+.pdk-legend .arrow { color: var(--accent); }
+.pdk-legend .val   { color: var(--green); }
+
+/* ── Convert button ──────────────────────────────────────────────── */
+.btn-convert {
+  width: 100%; padding: 13px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-d));
+  color: #000; font-family: var(--sans);
+  font-weight: 700; font-size: .9rem;
+  border: none; border-radius: var(--radius);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  transition: all .2s;
+  position: relative; overflow: hidden;
+  letter-spacing: .02em;
+}
+.btn-convert::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,.12), transparent);
+}
+.btn-convert:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(0,200,240,.35);
+}
+.btn-convert:active:not(:disabled) { transform: translateY(0); }
+.btn-convert:disabled { opacity: .35; cursor: not-allowed; }
+
+/* spinner */
+.spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(0,0,0,.25);
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: spin .65s linear infinite;
+  display: none;
+}
+.btn-convert.busy .spinner { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Error ───────────────────────────────────────────────────────── */
+.error {
+  background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-family: var(--mono); font-size: .75rem;
+  color: var(--red); display: none;
+}
+.error.show { display: block; }
+
+/* ── Right pane ──────────────────────────────────────────────────── */
+.right-pane {
+  display: flex; flex-direction: column;
+  background: var(--bg); overflow: hidden;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+.toolbar {
+  height: 40px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 12px;
+  background: var(--panel);
+}
+.toolbar-tab {
+  font-size: .72rem; font-family: var(--mono);
+  color: var(--muted); padding: 4px 10px;
+  border-radius: 6px; cursor: pointer;
+  transition: all .15s;
+}
+.toolbar-tab.active {
+  background: rgba(0,200,240,.1);
+  color: var(--accent);
+}
+.toolbar-spacer { flex: 1; }
+
+.btn-dl {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 14px;
+  background: rgba(34,197,94,.1);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,.3);
+  border-radius: 6px;
+  font-family: var(--mono); font-size: .72rem; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+  display: none;
+}
+.btn-dl.show { display: flex; }
+.btn-dl:hover { background: rgba(34,197,94,.18); transform: translateY(-1px); }
+
+/* ── Tab panels ──────────────────────────────────────────────────── */
+.tab-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.tab-panel   { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+.tab-panel.active { display: flex; }
+
+/* ── Empty state ─────────────────────────────────────────────────── */
+.empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--muted); gap: 12px; text-align: center;
+  padding: 40px;
+}
+.empty-icon { font-size: 3rem; opacity: .2; }
+.empty p    { font-family: var(--mono); font-size: .78rem; }
+
+/* ── Stats bar ───────────────────────────────────────────────────── */
+.stats-bar {
+  display: none; flex-shrink: 0;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.stats-bar.show { display: grid; }
+
+.stat {
+  background: var(--panel);
+  padding: 12px 20px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.stat-num {
+  font-family: var(--mono); font-size: 1.4rem; font-weight: 700; line-height: 1;
+}
+.stat-label {
+  font-family: var(--mono); font-size: .6rem;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+}
+
+/* ── Change log ──────────────────────────────────────────────────── */
+.log-wrap {
+  flex: 1; overflow-y: auto;
+}
+.log-wrap::-webkit-scrollbar { width: 4px; }
+.log-wrap::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.log-table {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--mono); font-size: .72rem;
+}
+.log-table thead {
+  position: sticky; top: 0;
+  background: var(--panel); z-index: 2;
+}
+.log-table th {
+  padding: 8px 16px; text-align: left;
+  font-size: .6rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.log-table td {
+  padding: 6px 16px;
+  border-bottom: 1px solid rgba(31,45,69,.5);
+  vertical-align: middle;
+}
+.log-table tr:hover td { background: rgba(255,255,255,.02); }
+
+.row-scaled  { border-left: 3px solid var(--orange); }
+.row-ok      { border-left: 3px solid var(--green); }
+.row-info    { border-left: 3px solid var(--accent); }
+
+.col-dev  { color: var(--accent); font-weight: 500; }
+.col-type {
+  color: var(--muted);
+  background: var(--card);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: .6rem;
+  white-space: nowrap;
+}
+.col-from { color: var(--muted); text-decoration: line-through; }
+.col-arr  { color: var(--border2); padding: 0 4px; }
+.col-to   { color: var(--green); }
+.col-to.warn { color: var(--orange); }
+.col-ratio { color: var(--purple); font-size: .68rem; }
+
+.badge {
+  padding: 1px 7px; border-radius: 4px;
+  font-size: .58rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em;
+  margin-left: 6px;
+}
+.badge-scaled { background: rgba(245,158,11,.15); color: var(--orange); border: 1px solid rgba(245,158,11,.3); }
+.badge-ok     { background: rgba(34,197,94,.1);   color: var(--green);  border: 1px solid rgba(34,197,94,.25); }
+
+/* ── Warn banner ─────────────────────────────────────────────────── */
+.warn-banner {
+  display: none;
+  background: rgba(245,158,11,.07);
+  border-bottom: 1px solid rgba(245,158,11,.2);
+  padding: 10px 20px;
+  font-family: var(--mono); font-size: .72rem;
+  color: var(--orange);
+  flex-shrink: 0;
+}
+.warn-banner.show { display: block; }
+
+/* ── Summary tab ─────────────────────────────────────────────────── */
+.summary-body {
+  flex: 1; overflow-y: auto; padding: 24px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px; align-content: start;
+}
+
+.sum-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.sum-card-title {
+  font-family: var(--mono); font-size: .65rem;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin-bottom: 12px;
+}
+.sum-device { font-weight: 600; font-size: .9rem; color: var(--accent); margin-bottom: 8px; }
+.sum-row {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: .72rem;
+  padding: 4px 0; border-bottom: 1px solid var(--border);
+}
+.sum-row:last-child { border-bottom: none; }
+.sum-key   { color: var(--muted); }
+.sum-val   { color: var(--text); }
+.sum-val.scaled { color: var(--orange); font-weight: 500; }
+.sum-val.ok     { color: var(--green); }
+
+/* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .content       { grid-template-columns: 1fr; }
+  .left-pane     { max-height: 55vh; }
+  .sidebar       { display: none; }
+  .stats-bar     { grid-template-columns: repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- Fake OS titlebar -->
+<div class="titlebar">
+  <div class="tb-dots">
+    <div class="tb-dot close"></div>
+    <div class="tb-dot min"></div>
+    <div class="tb-dot max"></div>
+  </div>
+  <div class="tb-title">Sky130 → GF180MCU Converter  ·  Xschem Schematic Migration Tool</div>
+</div>
+
+<div class="layout">
+
+  <!-- Sidebar icons -->
+  <div class="sidebar">
+    <div class="sb-icon active" title="Convert">⚡</div>
+    <div class="sb-icon" title="About" style="margin-top:auto;">ℹ</div>
+  </div>
+
+  <!-- Main content split -->
+  <div class="content">
+
+    <!-- ── LEFT PANE ── -->
+    <div class="left-pane">
+      <div class="pane-header">
+        <span style="font-size:1rem;">🔬</span>
+        <span class="pane-title">Input &amp; Configuration</span>
+      </div>
+
+      <div class="pane-body">
+
+        <!-- File upload -->
+        <div>
+          <div class="section-label">Schematic File</div>
+          <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+            <div class="drop-icon">📂</div>
+            <h3>Drop .sch file here</h3>
+            <p>or click to browse</p>
+          </div>
+          <input type="file" id="fileInput" accept=".sch">
+          <div class="file-chip" id="fileChip">
+            <span class="chip-icon">📄</span>
+            <span class="chip-name" id="chipName"></span>
+            <span class="chip-size" id="chipSize"></span>
+          </div>
+        </div>
+
+        <!-- Design rules -->
+        <div>
+          <div class="section-label">GF180MCU Design Rules</div>
+          <div class="rules-grid">
+            <div class="device-card nmos">
+              <div class="device-label">
+                <span class="tag"></span>NMOS — nfet_03v3
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Min L</label>
+                  <div class="input-wrap">
+                    <input type="number" id="nmos_Lmin" value="0.28" step="0.01" min="0.01">
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Min W</label>
+                  <div class="input-wrap">
+                    <input type="number" id="nmos_Wmin" value="0.44" step="0.01" min="0.01">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="device-card pmos">
+              <div class="device-label">
+                <span class="tag"></span>PMOS — pfet_03v3
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Min L</label>
+                  <div class="input-wrap">
+                    <input type="number" id="pmos_Lmin" value="0.28" step="0.01" min="0.01">
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Min W</label>
+                  <div class="input-wrap">
+                    <input type="number" id="pmos_Wmin" value="0.44" step="0.01" min="0.01">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend -->
+        <div>
+          <div class="section-label">Conversion Map</div>
+          <div class="pdk-legend">
+            <strong>Symbol</strong>&nbsp;&nbsp;<span class="arrow">→</span>&nbsp;&nbsp;<span class="val">symbols/pfet_03v3.sym</span><br>
+            <strong>Model &nbsp;</strong>&nbsp;&nbsp;<span class="arrow">→</span>&nbsp;&nbsp;<span class="val">pfet_03v3 / nfet_03v3</span><br>
+            <strong>W/L &nbsp;&nbsp;</strong>&nbsp;&nbsp;<span class="arrow">→</span>&nbsp;&nbsp;<span class="val">nm int → µm·u  (ratio preserved)</span><br>
+            <strong>Overlap</strong>&nbsp;<span class="arrow">→</span>&nbsp;&nbsp;<span class="val">0.29 → 0.18u</span><br>
+            <strong>mult &nbsp;</strong>&nbsp;&nbsp;<span class="arrow">→</span>&nbsp;&nbsp;<span class="val">m</span>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div class="error" id="errBox"></div>
+
+        <!-- Convert -->
+        <button class="btn-convert" id="convertBtn" onclick="doConvert()" disabled>
+          <span class="spinner"></span>
+          <span id="btnLabel">⚡&nbsp; Convert Schematic</span>
+        </button>
+
+      </div><!-- /pane-body -->
+    </div><!-- /left-pane -->
+
+    <!-- ── RIGHT PANE ── -->
+    <div class="right-pane">
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="toolbar-tab active" id="tab-log-btn"     onclick="switchTab('log')">Change Log</div>
+        <div class="toolbar-tab"        id="tab-summary-btn" onclick="switchTab('summary')">Device Summary</div>
+        <div class="toolbar-spacer"></div>
+        <button class="btn-dl" id="dlBtn">⬇ Download <span id="dlName"></span></button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-bar" id="statsBar">
+        <div class="stat">
+          <div class="stat-num" id="sDevices" style="color:var(--accent)">—</div>
+          <div class="stat-label">MOSFETs converted</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="sScaled" style="color:var(--orange)">—</div>
+          <div class="stat-label">Devices W/L scaled</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="sChanges" style="color:var(--green)">—</div>
+          <div class="stat-label">Total changes</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="sPct" style="color:var(--purple)">—</div>
+          <div class="stat-label">Ratio preserved</div>
+        </div>
+      </div>
+
+      <!-- Warn -->
+      <div class="warn-banner" id="warnBanner">
+        ⚠ Some devices were scaled to meet GF180 minimums.
+        W/L ratios are mathematically preserved — but verify bias points in NGspice after migration.
+      </div>
+
+      <!-- Tab content -->
+      <div class="tab-content">
+
+        <!-- Log tab -->
+        <div class="tab-panel active" id="tab-log">
+          <div class="empty" id="emptyLog">
+            <div class="empty-icon">📋</div>
+            <p>Conversion log will appear here</p>
+          </div>
+          <div class="log-wrap" id="logWrap" style="display:none">
+            <table class="log-table">
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Type</th>
+                  <th>From</th>
+                  <th></th>
+                  <th>To</th>
+                  <th>W/L Ratio</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Summary tab -->
+        <div class="tab-panel" id="tab-summary">
+          <div class="empty" id="emptySummary">
+            <div class="empty-icon">📊</div>
+            <p>Device summary will appear here</p>
+          </div>
+          <div class="summary-body" id="summaryBody" style="display:none"></div>
+        </div>
+
+      </div><!-- /tab-content -->
+    </div><!-- /right-pane -->
+  </div><!-- /content -->
+</div><!-- /layout -->
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+let selectedFile   = null;
+let convertedText  = '';
+let outputFilename = '';
+let resultChanges  = [];
+
+// ── File handling ──────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+['dragover','dragleave','drop'].forEach(evt => {
+  dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    if (evt === 'dragover') dropZone.classList.add('over');
+    if (evt === 'dragleave') dropZone.classList.remove('over');
+    if (evt === 'drop') {
+      dropZone.classList.remove('over');
+      if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+    }
+  });
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) loadFile(fileInput.files[0]);
+});
+
+function loadFile(file) {
+  if (!file.name.endsWith('.sch')) { showErr('Only .sch files are supported.'); return; }
+  selectedFile = file;
+  dropZone.classList.add('ready');
+  const chip = document.getElementById('fileChip');
+  chip.classList.add('show');
+  document.getElementById('chipName').textContent = file.name;
+  document.getElementById('chipSize').textContent = fmtBytes(file.size);
+  document.getElementById('convertBtn').disabled = false;
+  hideErr();
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB';
+}
+
+// ── Conversion ─────────────────────────────────────────────────────
+async function doConvert() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('convertBtn');
+  btn.classList.add('busy'); btn.disabled = true;
+  document.getElementById('btnLabel').textContent = 'Converting…';
+  hideErr();
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('nmos_Lmin', document.getElementById('nmos_Lmin').value);
+  fd.append('nmos_Wmin', document.getElementById('nmos_Wmin').value);
+  fd.append('pmos_Lmin', document.getElementById('pmos_Lmin').value);
+  fd.append('pmos_Wmin', document.getElementById('pmos_Wmin').value);
+
+  try {
+    const res  = await fetch('/convert', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) { showErr(data.error || 'Conversion failed.'); }
+    else { applyResults(data); }
+  } catch(e) { showErr('Network error: ' + e.message); }
+  finally {
+    btn.classList.remove('busy'); btn.disabled = false;
+    document.getElementById('btnLabel').textContent = '⚡\u00a0 Convert Schematic';
+  }
+}
+
+function applyResults(data) {
+  convertedText  = data.output;
+  outputFilename = data.filename;
+  resultChanges  = data.changes;
+
+  // Stats
+  const s = data.stats;
+  document.getElementById('sDevices').textContent = s.devices;
+  document.getElementById('sScaled').textContent  = s.scaled;
+  document.getElementById('sChanges').textContent = s.changes;
+  document.getElementById('sPct').textContent     = s.scaled > 0
+    ? Math.round((1 - s.scaled/s.devices)*100) + '% intact'
+    : '100%';
+  document.getElementById('statsBar').classList.add('show');
+
+  // Warn
+  const wb = document.getElementById('warnBanner');
+  s.scaled > 0 ? wb.classList.add('show') : wb.classList.remove('show');
+
+  // Download
+  const dl = document.getElementById('dlBtn');
+  dl.classList.add('show');
+  document.getElementById('dlName').textContent = outputFilename;
+
+  // Render log
+  renderLog(data.changes);
+  renderSummary(data.changes);
+}
+
+// ── Log table ──────────────────────────────────────────────────────
+const TYPE_COLORS = {
+  symbol: '#3b82f6', model: '#8b5cf6', 'W/L': '#f59e0b',
+  param: '#94a3b8', adps: '#00c8f0'
+};
+
+function renderLog(changes) {
+  document.getElementById('emptyLog').style.display  = 'none';
+  document.getElementById('logWrap').style.display   = 'block';
+  const tbody = document.getElementById('logBody');
+  tbody.innerHTML = '';
+
+  changes.forEach(c => {
+    const scaled = c.scaled;
+    const isInfo = c.type === 'adps' || c.type === 'param';
+    const rowCls = scaled ? 'row-scaled' : isInfo ? 'row-info' : 'row-ok';
+    const toCls  = scaled ? 'col-to warn' : 'col-to';
+    const badge  = scaled
+      ? '<span class="badge badge-scaled">Scaled</span>'
+      : (!isInfo ? '<span class="badge badge-ok">OK</span>' : '');
+
+    const ratio  = c.ratio ? `<span class="col-ratio">${c.ratio}</span>` : '—';
+    const color  = TYPE_COLORS[c.type] || '#94a3b8';
+
+    const tr = document.createElement('tr');
+    tr.className = rowCls;
+    tr.innerHTML = `
+      <td class="col-dev">${esc(c.device)}</td>
+      <td><span class="col-type" style="color:${color}">${esc(c.type)}</span></td>
+      <td class="col-from">${esc(String(c.from))}</td>
+      <td class="col-arr">→</td>
+      <td class="${toCls}">${esc(String(c.to))}</td>
+      <td>${ratio}</td>
+      <td>${badge}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Summary cards ──────────────────────────────────────────────────
+function renderSummary(changes) {
+  document.getElementById('emptySummary').style.display = 'none';
+  const body = document.getElementById('summaryBody');
+  body.style.display = 'grid';
+  body.innerHTML = '';
+
+  // Group by device
+  const devices = {};
+  changes.forEach(c => {
+    if (!devices[c.device]) devices[c.device] = [];
+    devices[c.device].push(c);
+  });
+
+  Object.entries(devices).forEach(([dev, rows]) => {
+    const wlRow   = rows.find(r => r.type === 'W/L');
+    const modRow  = rows.find(r => r.type === 'model');
+    const symRow  = rows.find(r => r.type === 'symbol');
+    const scaled  = wlRow?.scaled;
+
+    const card = document.createElement('div');
+    card.className = 'sum-card';
+    card.style.borderColor = scaled ? 'rgba(245,158,11,.35)' : 'var(--border)';
+
+    card.innerHTML = `
+      <div class="sum-card-title">Device</div>
+      <div class="sum-device">${esc(dev)} ${scaled ? '<span class="badge badge-scaled">Scaled</span>' : '<span class="badge badge-ok">OK</span>'}</div>
+      ${modRow  ? `<div class="sum-row"><span class="sum-key">Model</span><span class="sum-val">${esc(modRow.to)}</span></div>` : ''}
+      ${symRow  ? `<div class="sum-row"><span class="sum-key">Symbol</span><span class="sum-val" style="font-size:.65rem">${esc(symRow.to)}</span></div>` : ''}
+      ${wlRow   ? `<div class="sum-row"><span class="sum-key">W/L (orig)</span><span class="sum-val" style="color:var(--muted);font-size:.68rem">${esc(wlRow.from)}</span></div>` : ''}
+      ${wlRow   ? `<div class="sum-row"><span class="sum-key">W/L (new)</span><span class="sum-val ${scaled ? 'scaled' : 'ok'}">${esc(wlRow.to)}</span></div>` : ''}
+      ${wlRow?.ratio ? `<div class="sum-row"><span class="sum-key">W/L Ratio</span><span class="sum-val" style="color:var(--purple)">${esc(wlRow.ratio)}</span></div>` : ''}
+    `;
+    body.appendChild(card);
+  });
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────
+function switchTab(name) {
+  ['log','summary'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('active', t === name);
+    document.getElementById(`tab-${t}-btn`).classList.toggle('active', t === name);
+  });
+}
+
+// ── Download ───────────────────────────────────────────────────────
+document.getElementById('dlBtn').addEventListener('click', () => {
+  if (!convertedText) return;
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([convertedText], {type: 'text/plain'})),
+    download: outputFilename
+  });
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+// ── Helpers ────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function showErr(msg) {
+  const b = document.getElementById('errBox');
+  b.textContent = '✗ ' + msg; b.classList.add('show');
+}
+function hideErr() { document.getElementById('errBox').classList.remove('show'); }
+</script>
+</body>
+</html>

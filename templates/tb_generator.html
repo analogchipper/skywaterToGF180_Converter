@@ -297,6 +297,7 @@ body::after { content:''; position:fixed; inset:0;
         <div class="dl-row" id="dlRow">
           <input class="rename-input" id="renameInput" type="text" placeholder="testbench.sch">
           <button class="btn-dl" id="dlBtn">⬇ Download .sch</button>
+          <button class="btn-dl" id="dlSymBtn" style="background:rgba(139,92,246,.1);color:var(--purple);border-color:rgba(139,92,246,.3)">⬇ Download .sym</button>
         </div>
       </div>
 
@@ -438,6 +439,9 @@ function generate() {
     document.getElementById('renameInput').value = fname;
     document.getElementById('dlRow').classList.add('show');
     document.getElementById('dlBtn').classList.add('show');
+    // Show sym download only for circuits that have a sym file
+    const hasSym = ['inverter'].includes(state.circuit);
+    document.getElementById('dlSymBtn').style.display = hasSym ? 'flex' : 'none';
     document.getElementById('tbInfo').textContent =
       `${CIRCUITS[state.circuit].label} · ${TB_LABELS[state.tbType]} · ${state.pdk.toUpperCase()}`;
     document.getElementById('emptyState').style.display = 'none';
@@ -619,7 +623,10 @@ plot vdb(out)
 
 // ── Inverter testbenches ───────────────────────────────────────────
 function invSym(pdk, x, y) {
-  const sym = pdk === 'gf180' ? 'symbols/inv.sym' : 'sky130_fd_sc_hd/inv_1.sym';
+  // inv.sym pin offsets (from symbol file):
+  //   VDD: (-150, -20)  IN: (-150, 0)  OUT: (150, -20)  GND: (-150, 20)
+  // For GF180 we use the local inv.sym; for sky130 inline CMOS inverter
+  const sym = pdk === 'gf180' ? 'inv.sym' : 'inv.sym';
   return `C {${sym}} ${x} ${y} 0 0 {name=x1}`;
 }
 
@@ -630,16 +637,24 @@ tran 100p ${p.tstop||'4u'}
 write inv_tran.raw
 plot v(in) v(out)
 .endc`;
+  // Symbol at (250,0): VDD pin=(100,-20) IN=(100,0) OUT=(400,-20) GND=(100,20)
   return [header(),
-    vsrc('Vdd',-100,-200,p.vdd||'3.3'),
-    vsrc('Vin',100,-150,`PULSE(0 ${p.vdd||'3.3'} 0 ${p.trise||'100p'} ${p.trise||'100p'} 0.5u 1u)`),
-    gnd('l1',-100,-150), gnd('l2',100,-100),
-    labpin('p1',-100,-250,'vdd'),
-    wire(-100,-250,200,-250,'vdd'), wire(200,-250,200,-200,'vdd'),
-    wire(100,-100,100,-80,'in'), wire(300,-150,350,-150,'out'),
-    cap('Cl',350,-120,`${p.cl||'10'}f`),
-    gnd('l3',350,-70),
-    invSym(pdk, 250,-150),
+    `N -100 -20 100 -20 {lab=vdd}`,
+    `N -100 -20 -100 -120 {lab=vdd}`,
+    `N 400 -20 500 -20 {lab=out}`,
+    `N 100 0 0 0 {lab=in}`,
+    `N 0 0 0 100 {lab=in}`,
+    `N 100 20 100 100 {lab=gnd}`,
+    `N 100 100 500 100 {lab=gnd}`,
+    `N 500 -20 500 50 {lab=out}`,
+    `N 500 50 550 50 {lab=out}`,
+    `N 550 50 550 100 {lab=gnd}`,
+    vsrc('Vdd',-100,-170,p.vdd||'3.3'),
+    vsrc('Vin',0,50,`PULSE(0 ${p.vdd||'3.3'} 0 ${p.trise||'100p'} ${p.trise||'100p'} 0.5u 1u)`),
+    cap('Cl',550,75,`${p.cl||'10'}f`),
+    gnd('l1',-100,-120), gnd('l2',0,100), gnd('l3',550,100),
+    labpin('p1',-100,-220,'vdd'),
+    invSym(pdk, 250, 0),
     codeBlock('NGSPICE', ctrl),
     models(pdk)
   ].join('\n');
@@ -653,11 +668,17 @@ write inv_dc.raw
 plot v(out) v(in)
 .endc`;
   return [header(),
-    vsrc('Vdd',-100,-200,p.vdd||'3.3'),
-    vsrc('Vin',100,-150,'DC 0'),
-    gnd('l1',-100,-150), gnd('l2',100,-100),
-    labpin('p1',-100,-250,'vdd'),
-    invSym(pdk, 250,-150),
+    `N -100 -20 100 -20 {lab=vdd}`,
+    `N -100 -20 -100 -120 {lab=vdd}`,
+    `N 400 -20 500 -20 {lab=out}`,
+    `N 100 0 0 0 {lab=in}`,
+    `N 0 0 0 100 {lab=in}`,
+    `N 100 20 100 100 {lab=gnd}`,
+    vsrc('Vdd',-100,-170,p.vdd||'3.3'),
+    vsrc('Vin',0,50,'DC 0'),
+    gnd('l1',-100,-120), gnd('l2',0,100), gnd('l3',100,100),
+    labpin('p1',-100,-220,'vdd'),
+    invSym(pdk, 250, 0),
     codeBlock('NGSPICE', ctrl),
     models(pdk)
   ].join('\n');
@@ -671,12 +692,21 @@ write inv_ac.raw
 plot vdb(out)
 .endc`;
   return [header(),
-    vsrc('Vdd',-100,-200,p.vdd||'3.3'),
-    vsrc('Vin',100,-150,`AC 1 DC ${p.vcm||'1.65'}`),
-    gnd('l1',-100,-150), gnd('l2',100,-100),
-    labpin('p1',-100,-250,'vdd'),
-    cap('Cl',350,-120,`${p.cl||'10'}f`), gnd('l3',350,-70),
-    invSym(pdk, 250,-150),
+    `N -100 -20 100 -20 {lab=vdd}`,
+    `N -100 -20 -100 -120 {lab=vdd}`,
+    `N 400 -20 500 -20 {lab=out}`,
+    `N 100 0 0 0 {lab=in}`,
+    `N 0 0 0 100 {lab=in}`,
+    `N 100 20 100 100 {lab=gnd}`,
+    `N 500 -20 500 50 {lab=out}`,
+    `N 500 50 550 50 {lab=out}`,
+    `N 550 50 550 100 {lab=gnd}`,
+    vsrc('Vdd',-100,-170,p.vdd||'3.3'),
+    vsrc('Vin',0,50,`AC 1 DC ${p.vcm||'1.65'}`),
+    cap('Cl',550,75,`${p.cl||'10'}f`),
+    gnd('l1',-100,-120), gnd('l2',0,100), gnd('l3',550,100),
+    labpin('p1',-100,-220,'vdd'),
+    invSym(pdk, 250, 0),
     codeBlock('NGSPICE', ctrl),
     models(pdk)
   ].join('\n');
@@ -863,6 +893,48 @@ document.getElementById('dlBtn').addEventListener('click', () => {
   });
   a.click(); URL.revokeObjectURL(a.href);
 });
+
+document.getElementById('dlSymBtn').addEventListener('click', () => {
+  const symContent = getSymContent(state.circuit);
+  if (!symContent) return;
+  const symName = state.circuit + '.sym';
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([symContent], {type:'text/plain'})),
+    download: symName
+  });
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+function getSymContent(circuit) {
+  const syms = {
+    inverter: `v {xschem version=3.4.8RC file_version=1.3}
+G {}
+K {type=subcircuit
+format="@name @pinlist @symname"
+spectre_format="@name ( @pinlist ) @symname"
+template="name=x1"
+}
+V {}
+S {}
+F {}
+E {}
+L 4 -150 -20 -130 -20 {}
+L 4 -150 0 -130 0 {}
+L 4 -150 20 -130 20 {}
+L 7 130 -20 150 -20 {}
+B 5 -152.5 -22.5 -147.5 -17.5 {name=VDD dir=in}
+B 5 -152.5 -2.5 -147.5 2.5 {name=IN dir=in}
+B 5 147.5 -22.5 152.5 -17.5 {name=OUT dir=inout}
+B 5 -152.5 17.5 -147.5 22.5 {name=GND dir=in}
+P 4 5 130 -30 -130 -30 -130 30 130 30 130 -30 {}
+T {Inverter} -31.5 -6 0 0 0.3 0.3 {}
+T {VDD} -125 -24 0 0 0.2 0.2 {}
+T {IN} -125 -4 0 0 0.2 0.2 {}
+T {OUT} 125 -24 0 1 0.2 0.2 {}
+T {GND} -125 16 0 0 0.2 0.2 {}`,
+  };
+  return syms[circuit] || null;
+}
 </script>
 </body>
 </html>

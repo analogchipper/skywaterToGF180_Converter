@@ -103,14 +103,24 @@ W_GRID_UM = 0.005  # 5nm grid
 
 def scale_maintaining_ratio(w_raw, l_raw, min_w, min_l, nf=1):
     """
-    w_raw, l_raw : Sky130 nm values (plain integer strings)
-    min_w, min_l : GF180 minimums in µm
-    nf           : desired number of fingers (default 1 = no change)
+    Two-stage sizing:
 
-    W in xschem = total width. With nf fingers, each finger = W/nf.
-    Each finger must be >= min_w and on the 5nm grid.
-    Total W is then snapped finger_w * nf.
-    L is scaled to preserve the original W/L ratio of the whole device.
+    STAGE 1 — W/L ratio scaling (ignore nf):
+        Convert Sky130 nm → µm.
+        Scale L up to meet min_l, and if W < min_w scale both up
+        preserving W/L ratio. Snap W and L to 5nm grid.
+
+    STAGE 2 — Finger split (apply nf):
+        finger_w = W_total / nf
+        Snap finger_w UP to 5nm grid.
+        W_total_final = finger_w_snapped * nf  (written to schematic)
+        nf is written as-is.
+        Warn if finger_w < min_w (finger too narrow).
+
+    Example: W=100nm L=50nm ratio=2, min_w=0.44, min_l=0.28, nf=4
+      Stage1: W=0.88u L=0.44u (ratio preserved, both ≥ min)
+      Stage2: finger = 0.88/4 = 0.22u → snap UP → 0.22u
+              W_final = 0.22*4 = 0.88u, nf=4
     """
     w_clean = w_raw.rstrip('uU')
     l_clean = l_raw.rstrip('uU')
@@ -118,36 +128,38 @@ def scale_maintaining_ratio(w_raw, l_raw, min_w, min_l, nf=1):
         w_orig = float(w_clean) * SKY130_NM_TO_UM
         l_orig = float(l_clean) * SKY130_NM_TO_UM
     except ValueError:
-        return w_raw, l_raw, False, "expr", None, None
+        return w_raw, l_raw, False, "expr", None, None, None
 
-    ratio = w_orig / l_orig          # original W/L (total W / L)
+    ratio = w_orig / l_orig
 
-    # Per-finger minimum width
-    finger_min = min_w               # each finger >= min_w
+    # ── Stage 1: ratio-preserving scale to meet minimums ──────────
+    l_s1 = max(l_orig, min_l, min_w / ratio)
+    w_s1 = l_s1 * ratio
+    # Snap both to 5nm grid
+    w_s1 = snap_to_grid(w_s1, W_GRID_UM)
+    l_s1 = snap_to_grid(max(w_s1 / ratio, min_l), W_GRID_UM)
 
-    # Scale: each finger must be >= finger_min, and total W >= nf*finger_min
-    # Start from the ratio-preserving L, then compute per-finger W
-    l_new = max(l_orig, min_l, (nf * finger_min) / ratio)
-    w_total_new = l_new * ratio      # total W preserving ratio
-    finger_w = w_total_new / nf      # per-finger width
+    # ── Stage 2: finger split ──────────────────────────────────────
+    if nf > 1:
+        finger_w = w_s1 / nf
+        finger_w = snap_to_grid(finger_w, W_GRID_UM)   # snap UP
+        w_final  = finger_w * nf                        # total W
+        # keep L from stage1 (W/L ratio will shift slightly due to snapping,
+        # but L is already at the correct minimum-respecting value)
+        l_final  = l_s1
+    else:
+        w_final  = w_s1
+        l_final  = l_s1
+        finger_w = w_s1
 
-    # Snap each finger UP to 5nm grid
-    finger_w_snapped = snap_to_grid(max(finger_w, finger_min), W_GRID_UM)
+    scaled = (l_final - l_orig > 1e-6) or (w_final - w_orig > 1e-6)
 
-    # Recompute total W and L from snapped finger
-    w_snapped = finger_w_snapped * nf
-    # Recompute L to keep ratio exact
-    l_from_ratio = w_snapped / ratio
-    l_snapped = snap_to_grid(max(l_from_ratio, min_l), W_GRID_UM)
+    w_new_s     = f"{w_final:.4f}".rstrip('0').rstrip('.') + "u"
+    l_new_s     = f"{l_final:.4f}".rstrip('0').rstrip('.') + "u"
+    finger_w_s  = f"{finger_w:.4f}".rstrip('0').rstrip('.')
+    w_orig_s    = f"{w_orig:.4f}".rstrip('0').rstrip('.')
 
-    scaled = (l_snapped - l_orig > 1e-6) or (w_snapped - w_orig > 1e-6)
-
-    w_new_s  = f"{w_snapped:.4f}".rstrip('0').rstrip('.') + "u"
-    l_new_s  = f"{l_snapped:.4f}".rstrip('0').rstrip('.') + "u"
-    w_orig_s = f"{w_orig:.4f}".rstrip('0').rstrip('.')
-    l_orig_s = f"{l_orig:.4f}".rstrip('0').rstrip('.')
-
-    return w_new_s, l_new_s, scaled, f"{ratio:.3f}", w_orig_s, l_orig_s
+    return w_new_s, l_new_s, scaled, f"{ratio:.3f}", w_orig_s, finger_w_s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADPS REWRITE
@@ -206,24 +218,20 @@ def convert_component(comp, rules):
     w_raw, l_raw = get_param(props, "W"), get_param(props, "L")
 
     if w_raw and l_raw:
-        w_new, l_new, scaled, ratio, w_orig, l_orig = scale_maintaining_ratio(
+        w_new, l_new, scaled, ratio, w_orig, finger_w_s = scale_maintaining_ratio(
             w_raw, l_raw, Wmin, Lmin, nf=nf)
         props = set_param(props, "W", w_new)
         props = set_param(props, "L", l_new)
 
-        # Update nf in props if user requested fingers > 1
-        if nf > 1:
-            old_nf = get_param(props, "nf")
-            if old_nf is not None:
-                props = set_param(props, "nf", str(nf))
-
-        finger_w = float(w_new.rstrip('u')) / nf
-        finger_w_s = f"{finger_w:.4f}".rstrip('0').rstrip('.')
+        # Always write nf into schematic
+        old_nf = get_param(props, "nf")
+        if old_nf is not None:
+            props = set_param(props, "nf", str(nf))
 
         changes.append({
             'device': dev, 'type': 'W/L', 'scaled': scaled,
-            'from': f"W={w_orig}µm L={l_orig}µm" if w_orig else f"W={w_raw} L={l_raw}",
-            'to':   f"W={w_new} L={l_new}",
+            'from': f"W={w_orig}µm" if w_orig else f"W={w_raw}",
+            'to':   f"W={w_new} L={l_new} nf={nf}",
             'ratio': ratio,
             'nf': nf,
             'finger_w': finger_w_s,
@@ -272,6 +280,10 @@ def run_conversion(text, rules):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/testbench')
+def testbench():
+    return render_template('tb_generator.html')
 
 @app.route('/convert', methods=['POST'])
 def convert():

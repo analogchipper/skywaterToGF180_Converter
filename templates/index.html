@@ -368,8 +368,40 @@ input[type=file] { display: none; }
 }
 .dl-row.show { display: flex; }
 
+.nf-toggle-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px; padding: 7px 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-family: var(--mono); font-size: .7rem; color: var(--sub);
+  transition: border-color .15s;
+  user-select: none;
+}
+.nf-toggle-row:hover { border-color: var(--accent); color: var(--text); }
+.nf-checkbox {
+  width: 14px; height: 14px; border-radius: 4px;
+  border: 1.5px solid var(--border2); flex-shrink: 0;
+  transition: all .15s; background: transparent;
+  position: relative;
+}
+.nf-checkbox.checked {
+  background: var(--accent); border-color: var(--accent);
+}
+.nf-checkbox.checked::after {
+  content: '✓'; position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-size: .55rem; color: #000; font-weight: 900;
+}
+.nf-panel {
+  overflow: hidden; max-height: 0;
+  transition: max-height .25s ease, opacity .2s ease;
+  opacity: 0; margin-top: 0;
+}
+.nf-panel.open {
+  max-height: 80px; opacity: 1; margin-top: 10px;
+}
 .nf-row {
-  display: flex; align-items: center; gap: 6px; margin-top: 4px;
+  display: flex; align-items: center; gap: 6px;
 }
 .nf-btn {
   width: 26px; height: 26px;
@@ -383,21 +415,19 @@ input[type=file] { display: none; }
 .nf-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 .nf-input {
   width: 50px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
   font-family: var(--mono); font-size: .82rem;
-  padding: 5px 0; text-align: center;
-  outline: none;
+  padding: 5px 0; text-align: center; outline: none;
   -moz-appearance: textfield;
 }
 .nf-input::-webkit-outer-spin-button,
 .nf-input::-webkit-inner-spin-button { -webkit-appearance: none; }
 .nf-input:focus { border-color: var(--accent); }
+.nf-label { font-family: var(--mono); font-size: .7rem; color: var(--muted); }
 .nf-hint {
-  font-family: var(--mono); font-size: .6rem;
-  color: var(--purple); line-height: 1.3;
+  font-family: var(--mono); font-size: .62rem;
+  color: var(--purple); margin-top: 6px; min-height: 14px;
 }
 .rename-input {
   background: var(--card);
@@ -567,7 +597,12 @@ input[type=file] { display: none; }
     <div class="tb-dot min"></div>
     <div class="tb-dot max"></div>
   </div>
-  <div class="tb-title">Sky130 → GF180MCU Converter  ·  Xschem Schematic Migration Tool</div>
+  <div class="tb-title">Sky130 ↔ GF180MCU  ·  PDK Tools</div>
+</div>
+<div style="position:relative;z-index:10;background:#111827;border-bottom:1px solid #1f2d45;display:flex;align-items:center;padding:0 20px;gap:4px;height:42px;flex-shrink:0;">
+  <span style="font-family:var(--mono);font-size:.75rem;color:var(--muted);margin-right:12px;padding-right:12px;border-right:1px solid var(--border)">⚡ PDK Tools</span>
+  <a href="/" style="font-size:.78rem;font-weight:600;padding:6px 16px;border-radius:8px;cursor:pointer;background:rgba(0,200,240,.1);color:var(--accent);text-decoration:none;">🔄 Schematic Converter</a>
+  <a href="/testbench" style="font-size:.78rem;font-weight:600;padding:6px 16px;border-radius:8px;cursor:pointer;color:#475569;text-decoration:none;">🧪 Testbench Generator</a>
 </div>
 
 <div class="layout">
@@ -622,20 +657,24 @@ input[type=file] { display: none; }
                   </div>
                 </div>
                 <div class="field">
-                  <label>Min W/finger</label>
+                  <label>Min W</label>
                   <div class="input-wrap">
-                    <input type="number" id="nmos_Wmin" value="0.44" step="0.01" min="0.01" oninput="updateHint('nmos')">
+                    <input type="number" id="nmos_Wmin" value="0.44" step="0.01" min="0.01">
                   </div>
                 </div>
               </div>
-              <div class="field" style="margin-top:10px">
-                <label>Fingers (nf)</label>
+              <div class="nf-toggle-row" onclick="toggleNf('nmos')">
+                <div class="nf-checkbox" id="nmos_cb"></div>
+                <span>Set finger count (nf)</span>
+              </div>
+              <div class="nf-panel" id="nmos_nf_panel">
                 <div class="nf-row">
-                  <button class="nf-btn" onclick="changeNf('nmos',-1)">−</button>
-                  <input class="nf-input" type="number" id="nmos_nf" value="1" min="1" max="64" step="1" oninput="updateHint('nmos')">
-                  <button class="nf-btn" onclick="changeNf('nmos',1)">+</button>
-                  <span class="nf-hint" id="nmos_hint"></span>
+                  <button class="nf-btn" onclick="event.stopPropagation();changeNf('nmos',-1)">−</button>
+                  <input class="nf-input" type="number" id="nmos_nf" value="1" min="1" max="64" step="1" onclick="event.stopPropagation()" oninput="updateHint('nmos')">
+                  <button class="nf-btn" onclick="event.stopPropagation();changeNf('nmos',1)">+</button>
+                  <span class="nf-label">fingers</span>
                 </div>
+                <div class="nf-hint" id="nmos_hint"></div>
               </div>
             </div>
 
@@ -650,20 +689,24 @@ input[type=file] { display: none; }
                   </div>
                 </div>
                 <div class="field">
-                  <label>Min W/finger</label>
+                  <label>Min W</label>
                   <div class="input-wrap">
-                    <input type="number" id="pmos_Wmin" value="0.44" step="0.01" min="0.01" oninput="updateHint('pmos')">
+                    <input type="number" id="pmos_Wmin" value="0.44" step="0.01" min="0.01">
                   </div>
                 </div>
               </div>
-              <div class="field" style="margin-top:10px">
-                <label>Fingers (nf)</label>
+              <div class="nf-toggle-row" onclick="toggleNf('pmos')">
+                <div class="nf-checkbox" id="pmos_cb"></div>
+                <span>Set finger count (nf)</span>
+              </div>
+              <div class="nf-panel" id="pmos_nf_panel">
                 <div class="nf-row">
-                  <button class="nf-btn" onclick="changeNf('pmos',-1)">−</button>
-                  <input class="nf-input" type="number" id="pmos_nf" value="1" min="1" max="64" step="1" oninput="updateHint('pmos')">
-                  <button class="nf-btn" onclick="changeNf('pmos',1)">+</button>
-                  <span class="nf-hint" id="pmos_hint"></span>
+                  <button class="nf-btn" onclick="event.stopPropagation();changeNf('pmos',-1)">−</button>
+                  <input class="nf-input" type="number" id="pmos_nf" value="1" min="1" max="64" step="1" onclick="event.stopPropagation()" oninput="updateHint('pmos')">
+                  <button class="nf-btn" onclick="event.stopPropagation();changeNf('pmos',1)">+</button>
+                  <span class="nf-label">fingers</span>
                 </div>
+                <div class="nf-hint" id="pmos_hint"></div>
               </div>
             </div>
 
@@ -833,8 +876,8 @@ async function doConvert() {
   fd.append('nmos_Wmin', document.getElementById('nmos_Wmin').value);
   fd.append('pmos_Lmin', document.getElementById('pmos_Lmin').value);
   fd.append('pmos_Wmin', document.getElementById('pmos_Wmin').value);
-  fd.append('nmos_nf',   document.getElementById('nmos_nf').value);
-  fd.append('pmos_nf',   document.getElementById('pmos_nf').value);
+  fd.append('nmos_nf', nfEnabled.nmos ? document.getElementById('nmos_nf').value : '1');
+  fd.append('pmos_nf', nfEnabled.pmos ? document.getElementById('pmos_nf').value : '1');
 
   try {
     const res  = await fetch('/convert', { method: 'POST', body: fd });
@@ -976,6 +1019,20 @@ document.getElementById('dlBtn').addEventListener('click', () => {
 });
 
 // ── Finger helpers ────────────────────────────────────────────────
+const nfEnabled = { nmos: false, pmos: false };
+
+function toggleNf(type) {
+  nfEnabled[type] = !nfEnabled[type];
+  document.getElementById(type + '_cb').classList.toggle('checked', nfEnabled[type]);
+  document.getElementById(type + '_nf_panel').classList.toggle('open', nfEnabled[type]);
+  if (!nfEnabled[type]) {
+    document.getElementById(type + '_nf').value = 1;
+    document.getElementById(type + '_hint').textContent = '';
+  } else {
+    updateHint(type);
+  }
+}
+
 function changeNf(type, delta) {
   const el = document.getElementById(type + '_nf');
   el.value = Math.max(1, Math.min(64, (parseInt(el.value) || 1) + delta));
@@ -986,11 +1043,10 @@ function updateHint(type) {
   const nf   = parseInt(document.getElementById(type + '_nf').value) || 1;
   const wmin = parseFloat(document.getElementById(type + '_Wmin').value) || 0.44;
   const hint = document.getElementById(type + '_hint');
-  if (nf > 1) {
-    hint.textContent = `${nf}f × ${wmin}µm = ${(nf * wmin).toFixed(3)}µm total`;
-  } else {
-    hint.textContent = '';
-  }
+  // Stage1 W estimate = max(wmin * ratio_approx) but just show the split
+  hint.textContent = nf > 1
+    ? `W_total ÷ ${nf} fingers → each finger snapped to 5nm grid`
+    : '';
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
